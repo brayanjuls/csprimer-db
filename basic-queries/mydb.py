@@ -1,4 +1,42 @@
-import csv
+from data_layout import DB_HEADER_SIZE, PAGE_SIZE, DBHeader,DBPage
+
+class FileScan(object):
+    def __init__(self,path,db_name,table_name,schema):
+        self.header = DBHeader(db_name,table_name,schema)
+        self.page = DBPage()
+        self.db_path = path
+        self.db = open(self.db_path,mode='r+b')
+        #load header
+        db_header_bytes = self.db.read(DB_HEADER_SIZE)
+        self.header.decode(db_header_bytes)
+        
+        
+
+    def next(self) -> tuple:
+        if self.has_next():
+            record = self.page.records.pop(0)
+            return record.record
+        return ()
+
+    def has_next(self) -> bool:
+        if len(self.page.records) == 0:
+            self.load_next_page()
+        if len(self.page.records) > 0:
+            return True
+        return False
+            
+    
+    def load_next_page(self):
+         #load page
+        page_bytes = self.db.read(PAGE_SIZE)
+        self.page.decode(page_bytes,self.header.schema)
+
+    def __del__(self):
+        if self.db is not None:
+            self.db.close()
+
+
+
 class CSVFileStream(object):
 
     def __init__(self,path,chunk_size,separetor = ",",contain_header=True):
@@ -471,6 +509,18 @@ class TestCSVScanDB:
         print(result)
         assert result == (('Drama\n', 3294), ('Comedy\n', 1791), ('Documentary\n', 1550), ('Comedy|Drama\n', 964), ('Drama|Romance\n', 817))
 
+
+class TestFileScanDB:
+    db_path = "/home/ubuntu/Home/Downloads/ml-20m/movies.db"
+    def test_full_scan(self):
+        result = tuple(run(Q(
+            Projection(lambda x: (x[1],x[2])),
+            Limit(3),
+            FileScan(self.db_path,'mydb','movies',('int','str','str'))
+            )))
+        print("Data Results:")
+        print(result)
+        assert result == ((1, 'Toy Story (1995)'), (2, 'Jumanji (1995)'), (3, 'Grumpier Old Men (1995)'))
 
 
 

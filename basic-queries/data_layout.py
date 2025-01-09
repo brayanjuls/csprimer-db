@@ -25,7 +25,10 @@ class DataBaseIO:
             return ()
 
     def persist(self) -> bool:
-        #should encode records and header and persist them to disk
+        """
+            This function should encode records and header and persist them to disk,
+            currently this function is used as a utility to create the custom database file format on disk.
+        """
         try:
             db_page = self.page.encode()
             db_header = self.header.encode()
@@ -45,29 +48,43 @@ class DataBaseIO:
             return False
         return True
 
-    def read(self) -> tuple:
-        #should load the entire db from the database and decode the records
-        db_header_bytes = self.db.read(DB_HEADER_SIZE)
-        #print(db_header_bytes)
-        self.header.decode(db_header_bytes)
+    def read(self):
+        """
+            Read one page from the db and decodes it. Every time this function is called within the same execution instance
+            it would read the next page into memory.
+        """
         page_bytes = self.db.read(PAGE_SIZE)
-        #print(page_bytes)
-        #print("\n")
-        self.page.decode(page_bytes)
-        #print(self.db.read())
-        ()
+        self.page.decode(page_bytes,self.header.schema)
 
-    def add_record(self):
-        #should add records and correctly update the db header
-        pass
+    def add_record(self,record:"PageRecord"):
+        self.page.add_record(record)
+        self.header.table_size = self.header.byte_format.size + PAGE_SIZE # this should be the sum of all existing pages
+        self.header.end_offset = self.header.end_offset + PAGE_SIZE # this should be the sum of all existing pages
 
 
+    def encode(self) -> (bytearray, bytearray):
+         db_page = self.page.encode()
+         db_header = self.header.encode()
+         return db_header,db_page
+
+    def decode(self,header_bytes,page_bytes) -> tuple:
+        self.header.decode(header_bytes)
+        self.page.decode(page_bytes,self.header.schema)
+        return (self.header,self.page.records)
+
+       
     def flush(self):
         self.db.flush()
 
     def db_init(self):
+        """
+            Initiallize the database by reading the file if it already exists and only decoding the header
+            or creating a new database structure.
+        """
         if os.path.isfile(self.db_path):
            db = open(self.db_path,mode='r+b')
+           db_header_bytes = db.read(DB_HEADER_SIZE)
+           self.header.decode(db_header_bytes)
         else:
            db = open(self.db_path,mode='w+b')
            db_layout = bytearray()
@@ -88,14 +105,14 @@ class DataBaseIO:
 
 class DBHeader:
 
-    def __init__(self,db_name:str,table_name:str,schema:tuple,table_size=0,start_offset=0,end_offset=0):
+    def __init__(self,db_name:str,table_name:str,schema:tuple,table_size=0,end_offset=0):
         self.db_name = db_name
         self.table_name = table_name
-        self.schema = schema
+        self.schema = ('int',*schema) #this adds an internal id of type int to the schema
         self.table_size = table_size
-        self.start_offset = start_offset # starting offset of the first page, this should help to read records
-        self.end_offset = end_offset # ending offset of the last page, this should help to append new pages when the existing ones are full.
         self.byte_format = struct.Struct("<64s64s256siii")
+        self.start_offset = self.byte_format.size # start offset of the first page created, this should help to read records
+        self.end_offset = end_offset # end offset of the last page created, this should help to append new pages when the existing ones are full.
         #should we include total number of pages?
     
     def encode(self) -> bytes:
@@ -109,12 +126,24 @@ class DBHeader:
         return result
     
     def decode(self,header:bytes):
-        #byte 129 starting point of schema
-        #byte 385 starting point of table size
-        #byte 389 starting point of start offset
-        #byte 392 starting point of end offset
-        #this function should decode the header and set the value on the current instance of the object
-        pass
+        """
+            This function should decode the header and set the value on the current instance of the object.
+            Attributes starting bytes position:
+            - byte 0 database name
+            - byte 64 table name
+            - byte 128 schema
+            - byte 384 table size
+            - byte 388 start offset
+            - byte 392 end offset
+        """
+        self.db_name = header[0:64].decode('utf-8')
+        self.table_name = header[64:128].decode('utf-8')
+        #self.schema = tuple(header[128:384].decode('utf-8').split(','))
+        self.table_size = int.from_bytes(header[384:388],'little')
+        self.start_offset = int.from_bytes(header[388:392],'little')
+        self.end_offset = int.from_bytes(header[392:396],'little')
+        print(self.schema)
+    
 
     def __get_db_name(self):
         return self.db_name.encode('utf-8')
@@ -141,7 +170,7 @@ class PageHeader:
         self.max_id = max_id
         self.start_offset = start_offset # end of records pointers should make it easy to add new records pointers
         self.end_offset = end_offset # end of last appended record, should make it easy to add new records
-        self.record_pointers = record_pointers
+        self.record_pointers = record_pointers # tuple representing end offset and row size, this should help transversing the records and in the future probably updating records without strictly "closing the gap" while the operation happens.
         self.static_bytes_format = static_bytes_format
         self.size = len(record_pointers)# number of rows stored
         # should we include remaining free space variable?
@@ -154,7 +183,7 @@ class PageHeader:
 
         record_pointers = self.encode_record_pointers()
 
-        size = self.size + len(record_pointers)
+        size = len(self.record_pointers)
         static_header = self.static_bytes_format.pack(min_id,max_id,size,start_offset,end_offset)
 
         result = bytearray()
@@ -164,17 +193,34 @@ class PageHeader:
         result.extend(bytes(record_pointers))
         return result
 
-    def decode(self, header:bytearray) -> "PageHeader":
-        #byte 0 min id
-        #byte 4 max id
-        #byte 8 size
-        #byte 12 start offset
-        #byte 16 end offset
-        #byte 20 of page starting point of record pointers, use the start offset or size to limit how much you decode
-        print(int.from_bytes(header[20:24],'little')) #first value of the tuple (record pointers)
-        print(int.from_bytes(header[24:28],'little')) #second value of the tuple (record pointers)
-
-        pass
+    def decode(self, header:bytearray):
+        """
+            decodes page header from bytes back to PageHeader object. Following are byte start position for each attribute
+            - byte 0 min id
+            - byte 4 max id
+            - byte 8 size
+            - byte 12 start offset
+            - byte 16 end offset
+            - byte 20 of page starting point of record pointers
+        """
+        
+        min_id = int.from_bytes(header[0:4],'little')
+        max_id = int.from_bytes(header[4:8],'little')
+        size = int.from_bytes(header[8:12],'little')
+        start_offset = int.from_bytes(header[12:16],'little')
+        end_offset = int.from_bytes(header[16:20],'little')
+        self.min_id = min_id
+        self.max_id = max_id
+        self.size = size
+        self.start_offset = start_offset
+        self.end_offset = end_offset
+        record_pointers_size = len(header[20:])
+        #print("record_pointers_size: {}".format(record_pointers_size))
+        for i in range(20,record_pointers_size+20,8):
+            first_value = int.from_bytes(header[i:i+4],'little')
+            second_value = int.from_bytes(header[i+4:i+8],'little')
+            #print("record_pointers decoded: {} ".format((first_value,second_value)))
+            self.record_pointers.append((first_value,second_value))
 
     
     def encode_record_pointers(self) -> bytearray:
@@ -195,6 +241,14 @@ class PageRecord:
         self.schema = schema
 
     def encode(self) -> bytearray:
+        """
+            Encodes the record attribute into bytes. 
+            For each column we match the type and encode the content lenght 
+            and the content itself one next to the other, if the column is size 0 we assume it is null, 
+            this implies that an empty str may be considered null.
+
+            In order to remove complexity from parsing we assume the recors columns are in the same order as the schema.
+        """
         result_record = bytearray()
         n = len(self.record)
         i = 0
@@ -216,19 +270,12 @@ class PageRecord:
                 raise('dtype {} is not supported by the enconding algorithm',dtype)
 
             i+=1
-        print("record encoded")
-        print(result_record)
+        # print("record encoded : {}".format(result_record))
         return result_record
     
     def set_maxid(self,id:int):
         self.record = (id,*self.record)
 
-
-    def decode(self, record:bytes) -> tuple:
-        # Need to work on correclty identifying how much of the bytes that i am reading represent a row. 
-        # I should make sure I read the entire page. 
-        # identify end of records in the page. 
-        pass        
 
 class DBPage:
     def __init__(self,header:PageHeader = None,records:List[PageRecord] = None):
@@ -245,6 +292,10 @@ class DBPage:
 
 
     def encode(self) -> bytes:
+        """
+            This function uses the DBPage object content(header and records) and convert them into byte format,
+            so it can eventually be used to persist on disk. It returns the page in bytes.
+        """
         page = bytearray(PAGE_SIZE)
         if self.records is None:
             encoded_header = self.header.encode()
@@ -253,67 +304,109 @@ class DBPage:
         else:
             encoded_header = self.header.encode()
             header_size = len(encoded_header)
-            print("page header encoded")
-            print(encoded_header)
+            # print("page header encoded")
+            # print(encoded_header)
             page[0:header_size]=encoded_header
             
             for record,pointer in zip(self.records,self.header.record_pointers):
                 record_start_offset = pointer[0] - pointer[1]
                 record_end_offset = pointer[0]
-                print("pointer[0]: {}, pointer[1]: {}".format(pointer[0],pointer[1]))
-                print("record_end_offset: {}".format(record_end_offset))
+                # print("pointer[0]: {}, pointer[1]: {}".format(pointer[0],pointer[1]))
+                # print("record_end_offset: {}".format(record_end_offset))
                 page[record_start_offset:record_end_offset] = record.encode()
     
         return page
     
-    def decode(self,page_bytes:bytes):
-        #use the record pointers to start reading each row
-        print(page_bytes)
+    def decode(self,page_bytes:bytes,schema:tuple):
+        """
+            This function takes a page in byte format as input and parse it to human redeable format.
+            It uses the record pointers in the header of the page to reading each row.
+        """
         start_offset = int.from_bytes(page_bytes[12:16],"little")
-        print("start_offset: {}".format(start_offset))
         page_header = page_bytes[0:start_offset]
-        print("page_header : {}".format(page_header))
+       # print("page_header : {}".format(page_header))
         self.header.decode(page_header)
-        
+        for pointer in self.header.record_pointers:
+            start_offset = pointer[0] - pointer[1]
+            record_size = pointer[1]
+            record_bytes = page_bytes[start_offset:start_offset+record_size]
+            record = self.decode_record(record_bytes,schema)
+            self.records.append(PageRecord(record,schema))
+        #print([record.record for record in self.records])
+    
+    
+    def decode_record(self, record:bytes,schema:tuple) -> tuple:
+        """
+            First four bytes represent the column size.
+            The next bytes from the end of the column size to the column size represent the content of the current column.
+            We assume record columns has the same order as the schema so we use it to parse the types.
+        """
+        total_columns = len(schema)
+        i = 0
+        decode_record = []
+        #print("record bytes: {}".format(record))
+        #print("schema : {}".format(schema))
+        start_index =  i * 4
+        while i < total_columns:
+            dtype =  schema[i]
+            end_index = start_index+4
+            col_size = int.from_bytes(record[start_index:end_index],'little')
+            col_content = record[end_index:end_index+col_size]
+            
+            if dtype == 'int':
+                value = int.from_bytes(col_content,'little')
+                decode_record.append(value)
+                #print("col_size:col_content {}".format((col_size,value)))
+            elif dtype == 'float':
+                value = float.fromhex(col_content.hex)
+                decode_record.append(value)
+            elif dtype == 'str':
+                value = col_content.decode('utf8')
+                decode_record.append(value)
+            else:
+                raise('dtype {} is not supported by the enconding algorithm',dtype)
+            i+=1
+            start_index = end_index+col_size
+        return tuple(decode_record)
 
     def add_empty_page(self,offset) -> int:
-        page = bytearray(PAGE_SIZE)
-        page_header_size = self.fmt.page_header.size
-        page_header = self.fmt.page_header.pack(0,0,page_header_size,page_header_size,len(page))
-        page.extend(page_header)
-        self.db.seek(offset)
-        last_offset = self.db.write(page)
-        return last_offset
+        """
+            Creaste a new empty page with only the header
+        """
+        pass
 
     def add_record(self,record:PageRecord):
+        """
+            This function adds the row into the list of existing rows in the page. 
+            It generates an internal id that may be used to filter pages later and also calculate the record pointer that enables
+            transversing all the records of the page.
+            
+        """
         id = self.header.max_id+1
         record.set_maxid(id)
         
         self.records.append(record)
         record_bytes = record.encode()
         record_size = len(record_bytes)
-        self.header.record_pointers.append((self.header.end_offset,record_size))
         pointer_size = 8
         start_offset = self.header.start_offset + pointer_size
         end_offset = self.header.end_offset - record_size
+        self.header.record_pointers.append((self.header.end_offset,record_size))
         self.header.update(max_id=id,start_offset=start_offset,end_offset=end_offset)
-        print(record.record)
-    
-class PageLayout:
-    record:bytearray
-
+        #print(record.record)
 
 
 if __name__ == '__main__':
     db_io = DataBaseIO("/home/ubuntu/Home/Downloads/ml-20m/movies.csv",
                      "/home/ubuntu/Home/Downloads/ml-20m/movies.db",
-                     'mydb','movies',('int','str','str')
-                     )
-    # i = 15
-    # while i > 0:
-    #     i=i-1
-    #     record = db_io.get_next_tuple()
-    #     db_io.page.add_record(PageRecord(record,('int','int','str','str')))
+                     'mydb','movies',('int','str','str'))
+    i = 15
+    while i > 0:
+        i=i-1
+        record = db_io.get_next_tuple()
+        db_io.add_record(PageRecord(record,('int','int','str','str')))
     
-    # db_io.persist()
-    db_io.read()
+    header,records = db_io.decode(*db_io.encode())
+    print([record.record for record in records])
+    #db_io.persist()
+    #db_io.read()
