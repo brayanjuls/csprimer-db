@@ -267,6 +267,7 @@ class PageHeader:
         self.size = len(self.record_pointers)
     
 class PageRecord:
+    #TODO: do i really need a page record class? maybe this can be contained in the page class as a list of tuples
     def __init__(self,record:tuple):
         self.record = record
 
@@ -287,11 +288,9 @@ class PageRecord:
             dtype = schema[i]
             if dtype == 'int':
                 cur_col = self.record[i]
-                result_record.extend(struct.pack('i',4))
                 result_record.extend(struct.pack('i',int(cur_col)))
             elif dtype == 'float':
                 cur_col = self.record[i]
-                result_record.extend(struct.pack('i'),len(struct.pack("<f",float(cur_col))))
                 result_record.extend(struct.pack('f',float(cur_col)))
             elif dtype == 'str':
                 cur_col = self.record[i]
