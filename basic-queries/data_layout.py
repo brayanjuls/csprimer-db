@@ -36,12 +36,6 @@ class DataBaseIO:
             db_layout = bytearray()
             db_layout.extend(db_header)
             db_layout.extend(db_pages)
-            print("db_header size: {}".format(len(db_header)))
-            print("db_page size: {}".format(len(db_pages)))
-            print("db_layout size: {}".format(len(db_layout)))
-
-            print("header encoded")
-            print(db_header)            
             self.db.seek(0)
             self.db.write(db_layout)
             self.flush()
@@ -98,7 +92,6 @@ class DataBaseIO:
         n_pages = len(self.pages)
         i = 0
         while i < n_pages:
-            print("page number: {}".format(i))
             page = next(iter_pager)
             page.decode(page_bytes[PAGE_SIZE*i:PAGE_SIZE*(i+1)],self.header.schema)
             i+=1
@@ -163,9 +156,6 @@ class DBHeader:
         start_offset = self.__get_start_offset()
         end_offset = self.__get_end_offset()
         table_size = self.__get_table_size()
-        print(table_size)
-        print(start_offset)
-        print(end_offset)
         result = self.byte_format.pack(db_name,table_name,schema,table_size,start_offset,end_offset)
         return result
     
@@ -186,7 +176,6 @@ class DBHeader:
         self.table_size = int.from_bytes(header[384:388],'little')
         self.start_offset = int.from_bytes(header[388:392],'little')
         self.end_offset = int.from_bytes(header[392:400],'little')
-        print(self.schema)
     
 
     def __get_db_name(self):
@@ -259,11 +248,9 @@ class PageHeader:
         self.start_offset = start_offset
         self.end_offset = end_offset
         record_pointers_size = len(header[20:])
-        #print("record_pointers_size: {}".format(record_pointers_size))
         for i in range(20,record_pointers_size+20,8):
             first_value = int.from_bytes(header[i:i+4],'little')
             second_value = int.from_bytes(header[i+4:i+8],'little')
-            #print("record_pointers decoded: {} ".format((first_value,second_value)))
             self.record_pointers.append((first_value,second_value))
 
     
@@ -314,7 +301,6 @@ class PageRecord:
                 raise('dtype {} is not supported by the enconding algorithm',dtype)
 
             i+=1
-        # print("record encoded : {}".format(result_record))
         return result_record
     
     def set_internal_id(self,id:int):
@@ -346,15 +332,11 @@ class DBPage:
         else:
             encoded_header = self.header.encode()
             header_size = len(encoded_header)
-            # print("page header encoded")
-            # print(encoded_header)
             page[0:header_size]=encoded_header
             
             for record,pointer in zip(self.records,self.header.record_pointers):
                 record_start_offset = pointer[0] - pointer[1]
                 record_end_offset = pointer[0]
-                # print("pointer[0]: {}, pointer[1]: {}".format(pointer[0],pointer[1]))
-                # print("record_end_offset: {}".format(record_end_offset))
                 page[record_start_offset:record_end_offset] = record.encode(schema)
     
         return page
@@ -366,7 +348,6 @@ class DBPage:
         """
         start_offset = int.from_bytes(page_bytes[12:16],"little")
         page_header = page_bytes[0:start_offset]
-       # print("page_header : {}".format(page_header))
         self.header.decode(page_header)
         for pointer in self.header.record_pointers:
             start_offset = pointer[0] - pointer[1]
@@ -374,7 +355,6 @@ class DBPage:
             record_bytes = page_bytes[start_offset:start_offset+record_size]
             record = self.decode_record(record_bytes,schema)
             self.records.append(PageRecord(record))
-        #print([record.record for record in self.records])
     
     
     def decode_record(self, record:bytes,schema:tuple) -> tuple:
@@ -386,8 +366,6 @@ class DBPage:
         total_columns = len(schema)
         i = 0
         decode_record = []
-        # print("record bytes: {}".format(record))
-        # print("schema : {}".format(schema))
         start_index =  i * 4
         while i < total_columns:
             dtype =  schema[i]
@@ -398,7 +376,6 @@ class DBPage:
             if dtype == 'int':
                 value = int.from_bytes(col_content,'little')
                 decode_record.append(value)
-                #print("col_size:col_content {}".format((col_size,value)))
             elif dtype == 'float':
                 value = float.fromhex(col_content.hex)
                 decode_record.append(value)
@@ -409,7 +386,6 @@ class DBPage:
                 raise('dtype {} is not supported by the enconding algorithm',dtype)
             i+=1
             start_index = end_index+col_size
-       # print("decoded record: {}".format(tuple(decode_record)))
         return tuple(decode_record)
 
     def add_record(self,record:PageRecord,schema:tuple):
@@ -430,7 +406,6 @@ class DBPage:
         end_offset = self.header.end_offset - record_size
         self.header.record_pointers.append((self.header.end_offset,record_size))
         self.header.update(max_id=id,start_offset=start_offset,end_offset=end_offset)
-        #print(record.record)
 
 
 if __name__ == '__main__':

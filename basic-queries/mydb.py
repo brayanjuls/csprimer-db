@@ -29,6 +29,7 @@ class FileScan(object):
     def load_next_page(self):
          #load page
         page_bytes = self.db.read(PAGE_SIZE)
+        self.page = DBPage()
         self.page.decode(page_bytes,self.header.schema)
 
     def __del__(self):
@@ -511,10 +512,10 @@ class TestCSVScanDB:
 
 
 class TestFileScanDB:
-    db_path = "/home/ubuntu/Home/Downloads/ml-20m/movies.db"
+    db_path = "/home/ubuntu/Home/Downloads/ml-20m/movies_slotted.db"
     def test_full_scan(self):
         result = tuple(run(Q(
-            Projection(lambda x: (x[1],x[2])),
+            Projection(lambda x: (x[0],x[1])),
             Limit(3),
             FileScan(self.db_path,'mydb','movies',('int','str','str'))
             )))
