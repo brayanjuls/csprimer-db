@@ -512,7 +512,7 @@ class TestCSVScanDB:
 
 
 class TestFileScanDB:
-    db_path = "/home/ubuntu/Home/Downloads/ml-20m/movies_slotted.db"
+    db_path = "/home/ubuntu/Home/Downloads/ml-20m/movies_slotted_2.db"
     def test_full_scan(self):
         result = tuple(run(Q(
             Projection(lambda x: (x[0],x[1])),

@@ -48,8 +48,15 @@ class DataBaseIO:
             Read one page from the db and decodes it. Every time this function is called within the same execution instance
             it would read the next page into memory.
         """
-        page_bytes = self.db.read(PAGE_SIZE)
-        self.page.decode(page_bytes,self.header.schema)
+        try:
+            page_bytes = self.db.read(PAGE_SIZE)
+            if len(page_bytes) == 0:
+                return False
+            self.pages.append(DBPage())
+            self.last_page().decode(page_bytes,self.header.schema)
+        except:
+            return False
+        return True
 
     def add_record(self,record:"PageRecord"):
         page = self.last_page()
@@ -365,26 +372,31 @@ class DBPage:
         total_columns = len(schema)
         i = 0
         decode_record = []
-        start_index =  i * 4
+        start_index =  i
         while i < total_columns:
             dtype =  schema[i]
             end_index = start_index+4
-            col_size = int.from_bytes(record[start_index:end_index],'little')
-            col_content = record[end_index:end_index+col_size]
             
             if dtype == 'int':
+                col_content = record[start_index:end_index]
                 value = int.from_bytes(col_content,'little')
                 decode_record.append(value)
+                start_index = end_index
             elif dtype == 'float':
+                col_content = record[start_index:end_index]
                 value = float.fromhex(col_content.hex)
                 decode_record.append(value)
+                start_index = end_index
             elif dtype == 'str':
+                col_size = int.from_bytes(record[start_index:end_index],'little')
+                col_content = record[end_index:end_index+col_size]
                 value = col_content.decode('utf8')
                 decode_record.append(value)
+                start_index = end_index+col_size
             else:
                 raise('dtype {} is not supported by the enconding algorithm',dtype)
             i+=1
-            start_index = end_index+col_size
+            
         return tuple(decode_record)
 
     def add_record(self,record:PageRecord,schema:tuple):
@@ -409,15 +421,15 @@ class DBPage:
 
 if __name__ == '__main__':
     db_io = DataBaseIO("/home/ubuntu/Home/Downloads/ml-20m/movies.csv",
-                     "/home/ubuntu/Home/Downloads/ml-20m/movies_slotted.db",
+                     "/home/ubuntu/Home/Downloads/ml-20m/movies_slotted_2.db",
                      'mydb','movies',('int','str','str'))
     i = 120
-    while True:
-        i=i-1
-        record = db_io.get_next_tuple()
-        if record == ():
-            break
-        db_io.add_record(PageRecord(record))
+    # while True:
+    #     i=i-1
+    #     record = db_io.get_next_tuple()
+    #     if record == ():
+    #         break
+    #     db_io.add_record(PageRecord(record))
     # pages = db_io.decode(*db_io.encode())[1]
     # records_list = [p.records  for p in pages]
     # records = [ record 
@@ -426,6 +438,8 @@ if __name__ == '__main__':
     # print([record.record for record in records])
 
     #header,records = db_io.decode(*db_io.encode())
-    #print([record.record for record in records])
-    db_io.persist()
-    #db_io.read()
+    
+    #db_io.persist()
+    while db_io.read():
+        records = db_io.last_page().records
+        print([record.record for record in records])
