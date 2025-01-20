@@ -8,23 +8,12 @@ from typing import List
 PAGE_SIZE = 4096
 DB_HEADER_SIZE = 400
 
-class DataBaseIO:
-    
-    def __init__(self,input_path,db_path,db_name,table_name,schema):
+class DataBase:
+    def __init__(self,db_path,db_name,table_name,schema):
         self.header = DBHeader(db_name,table_name,schema)
         self.pages:list[DBPage] = list()
         self.db_path = db_path
         self.db = self.db_init()
-        self.csv_f = open(input_path)
-        self.reader = csv.reader(self.csv_f)
-        #read header
-        next(self.reader)
-
-    def get_next_tuple(self) -> tuple:
-        try:
-            return tuple(next(self.reader))
-        except:
-            return ()
 
     def persist(self) -> bool:
         """
@@ -38,7 +27,7 @@ class DataBaseIO:
             db_layout.extend(db_pages)
             self.db.seek(0)
             self.db.write(db_layout)
-            self.flush()
+            self.flush(0)
         except:
             return False
         return True
@@ -57,17 +46,26 @@ class DataBaseIO:
         except:
             return False
         return True
-
-    def add_record(self,record:"PageRecord"):
-        page = self.last_page()
+    
+    def write(self):
+        start_page_offset = self.header.end_offset - PAGE_SIZE * len(self.pages)
+        start_header_offset = 0
+        db_header, db_pages = self.encode()
         
+        self.flush(start_page_offset)
+
+    def add_record(self,record:tuple):
+        page = self.last_page()
+        record = PageRecord(record)
         if not self.has_free_space(page,record=record):
             self.pages.append(DBPage())
             page = self.last_page()
+            print("new page, old end offset: {} - new end offser {}".format(self.header.end_offset,self.header.end_offset + PAGE_SIZE))
+            self.header.end_offset = self.header.end_offset + PAGE_SIZE
             
         page.add_record(record,self.header.schema)
         self.header.table_size = self.header.byte_format.size + PAGE_SIZE * len(self.pages)
-        self.header.end_offset = self.header.end_offset + PAGE_SIZE * len(self.pages)
+        
 
     def combine_pages(self,x,y,schema) -> bytearray:
    
@@ -106,8 +104,9 @@ class DataBaseIO:
         return (self.header,self.pages)
 
        
-    def flush(self):
-        self.db.seek(0)
+    def flush(self,offset):
+        ## todo: change this logic, maybe we may want to send the bytes to write to disk as input parameters instead of reference from the class
+        self.db.seek(offset)
         with open(self.db_path,"w+b") as f:
             f.write(self.db.read())
 
@@ -118,7 +117,19 @@ class DataBaseIO:
         """
         Last insered page in the pages list.
         """
-        last = len(self.pages) -1
+        n = len(self.pages)
+       # print(n)
+        if n > 0:
+           last = n-1
+        else:
+            print("end offset {}".format(self.header.end_offset - PAGE_SIZE))
+            self.db.seek( self.header.end_offset - PAGE_SIZE if self.header.end_offset > 0 else 0)
+            page_bytes = self.db.read(PAGE_SIZE)
+            page = DBPage()
+            page.decode(page_bytes,self.header.schema)
+            self.pages.append(page)
+            last = 0
+        
         return self.pages[last]
 
 
@@ -134,15 +145,14 @@ class DataBaseIO:
         else:
            db = BytesIO()
            self.pages.append(DBPage())
+           self.header.end_offset = self.header.end_offset + PAGE_SIZE
         return db
 
         
     
     def __del__(self):
-        if self.csv_f is not None:
-            self.csv_f.close()
         if self.db is not None:
-            self.db.close()
+            self.db.close()    
 
 class DBHeader:
 
@@ -153,7 +163,7 @@ class DBHeader:
         self.table_size = table_size
         self.byte_format = struct.Struct("<64s64s256siiq")
         self.start_offset = self.byte_format.size # start offset of the first page created, this should help to read records
-        self.end_offset = end_offset # end offset of the last page created, this should help to append new pages when the existing ones are full.
+        self.end_offset = self.byte_format.size # end offset of the last page created, this should help to append new pages when the existing ones are full.
         #should we include total number of pages?
     
     def encode(self) -> bytes:
@@ -182,7 +192,9 @@ class DBHeader:
         #self.schema = tuple(header[128:384].decode('utf-8').split(','))
         self.table_size = int.from_bytes(header[384:388],'little')
         self.start_offset = int.from_bytes(header[388:392],'little')
-        self.end_offset = int.from_bytes(header[392:400],'little')
+        self.end_offset = int.from_bytes(header[392:DB_HEADER_SIZE],'little')
+        print("db end offset 8 bytes {}".format(int.from_bytes(header[392:400],'little')))
+        print("db end offset 4 bytes {}".format(int.from_bytes(header[392:396],'little')))
     
 
     def __get_db_name(self):
@@ -301,7 +313,7 @@ class PageRecord:
                 result_record.extend(struct.pack('f',float(cur_col)))
             elif dtype == 'str':
                 cur_col = self.record[i]
-                result_record.extend(struct.pack('i',len(cur_col))) #does the string size equal to the bytes size?
+                result_record.extend(struct.pack('i',len(cur_col.encode('utf-8'))))
                 result_record.extend(struct.pack('{}s'.format(len(cur_col)),cur_col.encode('utf-8')))
             else:
                 raise('dtype {} is not supported by the enconding algorithm',dtype)
@@ -356,6 +368,7 @@ class DBPage:
         page_header = page_bytes[0:start_offset]
         self.header.decode(page_header)
         for pointer in self.header.record_pointers:
+            print("start offset: {}, record size: {}".format(pointer[0],pointer[1]))
             start_offset = pointer[0] - pointer[1]
             record_size = pointer[1]
             record_bytes = page_bytes[start_offset:start_offset+record_size]
@@ -373,6 +386,7 @@ class DBPage:
         i = 0
         decode_record = []
         start_index =  i
+        print(record)
         while i < total_columns:
             dtype =  schema[i]
             end_index = start_index+4
@@ -412,6 +426,7 @@ class DBPage:
         self.records.append(record)
         record_bytes = record.encode(schema)
         record_size = len(record_bytes)
+       # print("current tuple: {}, size: {}".format(record.record,record_size))
         pointer_size = 8
         start_offset = self.header.start_offset + pointer_size
         end_offset = self.header.end_offset - record_size
@@ -419,17 +434,27 @@ class DBPage:
         self.header.update(max_id=id,start_offset=start_offset,end_offset=end_offset)
 
 
+def get_next_tuple(reader) -> tuple:
+        try:
+            return tuple(next(reader))
+        except:
+            return ()
+        
 if __name__ == '__main__':
-    db_io = DataBaseIO("/home/ubuntu/Home/Downloads/ml-20m/movies.csv",
+    csv_f = open("/home/ubuntu/Home/Downloads/ml-20m/movies.csv")
+    reader = csv.reader(csv_f)
+    #read header
+    next(reader)
+    db_io = DataBase(
                      "/home/ubuntu/Home/Downloads/ml-20m/movies_slotted_2.db",
                      'mydb','movies',('int','str','str'))
     i = 120
-    # while True:
-    #     i=i-1
-    #     record = db_io.get_next_tuple()
-    #     if record == ():
-    #         break
-    #     db_io.add_record(PageRecord(record))
+    while True:
+        i=i-1
+        record = get_next_tuple(reader)
+        if record == ():
+            break
+        db_io.add_record(record)
     # pages = db_io.decode(*db_io.encode())[1]
     # records_list = [p.records  for p in pages]
     # records = [ record 
@@ -439,7 +464,7 @@ if __name__ == '__main__':
 
     #header,records = db_io.decode(*db_io.encode())
     
-    #db_io.persist()
-    while db_io.read():
-        records = db_io.last_page().records
-        print([record.record for record in records])
+    db_io.persist()
+    # while db_io.read():
+    #     records = db_io.last_page().records
+    #     print([record.record for record in records])

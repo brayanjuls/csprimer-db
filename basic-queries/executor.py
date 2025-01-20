@@ -1,4 +1,4 @@
-from data_layout import DB_HEADER_SIZE, PAGE_SIZE, DBHeader,DBPage
+from data_layout import DB_HEADER_SIZE, PAGE_SIZE, DBHeader,DBPage, DataBase
 
 class FileScan(object):
     def __init__(self,path,db_name,table_name,schema):
@@ -296,6 +296,27 @@ class Aggregation(object):
     def has_next(self):
         return self.child.has_next() or len(self.result_keys) > 0
 
+
+class Insert(object):
+
+    def __init__(self,db:DataBase,records:list[tuple]):
+        self.records = records
+        self.db = db
+        self.n = len(records)
+    
+    def next(self):
+        self.db.add_record(self.records.pop(0))
+    
+    def has_next(self):
+        if len(self.records) > 0:
+            return True
+        else:
+            self.db.write()
+            print("{} records inserted".format(self.n))
+        return False
+
+            
+
 def Q(*nodes):
     """
     Construct a linked list of executor nodes from the given arguments,
@@ -523,6 +544,14 @@ class TestFileScanDB:
         print(result)
         assert result == ((1, 'Toy Story (1995)'), (2, 'Jumanji (1995)'), (3, 'Grumpier Old Men (1995)'))
 
+
+class TestInsertRecordDB:
+    db_path = "/home/ubuntu/Home/Downloads/ml-20m/movies_slotted_2.db"
+    
+    def test_insert_one_record(self):
+        record = [(10000000,'Openhaimer','documentary')]
+        db = DataBase(self.db_path,"mydb","movies",('int','str','str'))
+        result = tuple(run(Q(Insert(db,record))))
 
 
 if __name__ == '__main__':
