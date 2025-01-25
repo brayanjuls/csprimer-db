@@ -51,8 +51,13 @@ class DataBase:
         start_page_offset = self.header.end_offset - PAGE_SIZE * len(self.pages)
         start_header_offset = 0
         db_header, db_pages = self.encode()
+        print("page to write: {}".format(db_pages))
+        self.db.seek(start_page_offset)
+        self.db.write(db_pages)
+
+        # self.db.seek(start_header_offset)
+        # self.db.write(db_header)
         
-        self.flush(start_page_offset)
 
     def add_record(self,record:tuple):
         page = self.last_page()
@@ -313,8 +318,11 @@ class PageRecord:
                 result_record.extend(struct.pack('f',float(cur_col)))
             elif dtype == 'str':
                 cur_col = self.record[i]
-                result_record.extend(struct.pack('i',len(cur_col.encode('utf-8'))))
-                result_record.extend(struct.pack('{}s'.format(len(cur_col)),cur_col.encode('utf-8')))
+                col_size = len(cur_col.encode('utf-8'))
+                #print("encode col_size: {}".format(col_size))
+                #print("encode col_size bytes 1: {}".format(struct.pack('<i',col_size)))
+                result_record.extend(col_size.to_bytes(1,byteorder='little'))
+                result_record.extend(struct.pack('{}s'.format(col_size),cur_col.encode('utf-8')))
             else:
                 raise('dtype {} is not supported by the enconding algorithm',dtype)
 
@@ -368,10 +376,11 @@ class DBPage:
         page_header = page_bytes[0:start_offset]
         self.header.decode(page_header)
         for pointer in self.header.record_pointers:
-            print("start offset: {}, record size: {}".format(pointer[0],pointer[1]))
             start_offset = pointer[0] - pointer[1]
             record_size = pointer[1]
+            #print("record_size: {}, start_offset: {}".format(record_size,start_offset))
             record_bytes = page_bytes[start_offset:start_offset+record_size]
+            #print("record: {}".format(record_bytes))
             record = self.decode_record(record_bytes,schema)
             self.records.append(PageRecord(record))
     
@@ -386,22 +395,23 @@ class DBPage:
         i = 0
         decode_record = []
         start_index =  i
-        print(record)
         while i < total_columns:
-            dtype =  schema[i]
-            end_index = start_index+4
+            dtype =  schema[i]            
             
             if dtype == 'int':
+                end_index = start_index+4
                 col_content = record[start_index:end_index]
                 value = int.from_bytes(col_content,'little')
                 decode_record.append(value)
                 start_index = end_index
             elif dtype == 'float':
+                end_index = start_index+4
                 col_content = record[start_index:end_index]
                 value = float.fromhex(col_content.hex)
                 decode_record.append(value)
                 start_index = end_index
             elif dtype == 'str':
+                end_index = start_index+1
                 col_size = int.from_bytes(record[start_index:end_index],'little')
                 col_content = record[end_index:end_index+col_size]
                 value = col_content.decode('utf8')
@@ -426,7 +436,6 @@ class DBPage:
         self.records.append(record)
         record_bytes = record.encode(schema)
         record_size = len(record_bytes)
-       # print("current tuple: {}, size: {}".format(record.record,record_size))
         pointer_size = 8
         start_offset = self.header.start_offset + pointer_size
         end_offset = self.header.end_offset - record_size

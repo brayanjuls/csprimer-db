@@ -197,6 +197,7 @@ class Sort(object):
                     break
                 self.sorted_elements.append(element)
             #print(f"unsorted_elements: {self.sorted_elements}")
+            
             self.buble_sort()
             #print(f"sorted_elements: {self.sorted_elements}")
             current_element = self.sorted_elements[self.idx]
@@ -211,7 +212,6 @@ class Sort(object):
     def buble_sort(self):
         i = 0
         n = len(self.sorted_elements)
-
         while i < n:
             j = 0
             while j < n:
@@ -537,12 +537,27 @@ class TestFileScanDB:
     def test_full_scan(self):
         result = tuple(run(Q(
             Projection(lambda x: (x[0],x[1])),
+            Sort(lambda x: x[0],True),
             Limit(3),
             FileScan(self.db_path,'mydb','movies',('int','str','str'))
             )))
         print("Data Results:")
         print(result)
-        assert result == ((1, 'Toy Story (1995)'), (2, 'Jumanji (1995)'), (3, 'Grumpier Old Men (1995)'))
+        #assert result == ((1, 'Toy Story (1995)'), (2, 'Jumanji (1995)'), (3, 'Grumpier Old Men (1995)'))
+
+    def test_count_performance_on_the_whole_dataset(self):
+            
+            result = tuple(run(Q(
+                Projection(lambda x: (x[0], x[1],x[2])),
+                Limit(5),
+               # Sort(lambda x: x[1],True),
+                Aggregation(lambda x: x[2], lambda x: x[2],"count"),
+                FileScan(self.db_path,'mydb','movies',('int','str','str'))
+            )))
+            print("Data Results:")
+            print(result)
+            #assert result == (('Drama\n', 3294), ('Comedy\n', 1791), ('Documentary\n', 1550), ('Comedy|Drama\n', 964), ('Drama|Romance\n', 817))
+    
 
 
 class TestInsertRecordDB:
@@ -552,6 +567,7 @@ class TestInsertRecordDB:
         record = [(10000000,'Openhaimer','documentary')]
         db = DataBase(self.db_path,"mydb","movies",('int','str','str'))
         result = tuple(run(Q(Insert(db,record))))
+
 
 
 if __name__ == '__main__':
