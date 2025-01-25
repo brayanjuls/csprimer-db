@@ -38,6 +38,7 @@ class DataBase:
             it would read the next page into memory.
         """
         try:
+           # print("current memory position {}".format(self.db.tell()))
             page_bytes = self.db.read(PAGE_SIZE)
             if len(page_bytes) == 0:
                 return False
@@ -120,14 +121,14 @@ class DataBase:
 
     def last_page(self) -> "DBPage":
         """
-        Last insered page in the pages list.
+        Get last inserted page in the pages list, if it does not exists load the page from file
         """
         n = len(self.pages)
        # print(n)
         if n > 0:
            last = n-1
         else:
-            print("end offset {}".format(self.header.end_offset - PAGE_SIZE))
+           # print("end offset {}".format(self.header.end_offset - PAGE_SIZE))
             self.db.seek( self.header.end_offset - PAGE_SIZE if self.header.end_offset > 0 else 0)
             page_bytes = self.db.read(PAGE_SIZE)
             page = DBPage()

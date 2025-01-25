@@ -1,40 +1,36 @@
-from data_layout import DB_HEADER_SIZE, PAGE_SIZE, DBHeader,DBPage, DataBase
+from data_layout import DataBase
 
 class FileScan(object):
     def __init__(self,path,db_name,table_name,schema):
-        self.header = DBHeader(db_name,table_name,schema)
-        self.page = DBPage()
-        self.db_path = path
-        self.db = open(self.db_path,mode='r+b')
-        #load header
-        db_header_bytes = self.db.read(DB_HEADER_SIZE)
-        self.header.decode(db_header_bytes)
+        self.db = DataBase(path,db_name,table_name,schema)
         
-        
-
+    
     def next(self) -> tuple:
         if self.has_next():
-            record = self.page.records.pop(0)
+            record = self.db.last_page().records.pop(0)
             return record.record
-        return ()
+        return None
 
     def has_next(self) -> bool:
-        if len(self.page.records) == 0:
+
+        if len(self.db.pages) == 0:
             self.load_next_page()
-        if len(self.page.records) > 0:
+
+        if len(self.db.pages) > 0  and len(self.db.last_page().records) == 0:
+            self.db.pages.pop()
+            self.load_next_page()
+
+        if len(self.db.pages) > 0 and len(self.db.last_page().records) > 0:
+            #print("We have records to read")
             return True
         return False
             
     
     def load_next_page(self):
          #load page
-        page_bytes = self.db.read(PAGE_SIZE)
-        self.page = DBPage()
-        self.page.decode(page_bytes,self.header.schema)
-
-    def __del__(self):
-        if self.db is not None:
-            self.db.close()
+        is_page_loaded = self.db.read()
+        # if not is_page_loaded:
+        #     print("not more pages available to load")
 
 
 
@@ -271,6 +267,7 @@ class Aggregation(object):
                 current_tuple = self.child.next()
                 if current_tuple is None:
                     break
+      
                 current_group_col  = self.group_col(current_tuple)
                 current_acc_val = self.acc.get(current_group_col,0)
                 self.result_keys.add(current_group_col)
@@ -289,9 +286,6 @@ class Aggregation(object):
         else:
             key = self.result_keys.pop()
             return (key,self.acc.get(key))
-    
-        return None
-
 
     def has_next(self):
         return self.child.has_next() or len(self.result_keys) > 0
@@ -537,8 +531,8 @@ class TestFileScanDB:
     def test_full_scan(self):
         result = tuple(run(Q(
             Projection(lambda x: (x[0],x[1])),
-            Sort(lambda x: x[0],True),
-            Limit(3),
+          #  Sort(lambda x: x[0],True),
+            Limit(100),
             FileScan(self.db_path,'mydb','movies',('int','str','str'))
             )))
         print("Data Results:")
@@ -548,7 +542,7 @@ class TestFileScanDB:
     def test_count_performance_on_the_whole_dataset(self):
             
             result = tuple(run(Q(
-                Projection(lambda x: (x[0], x[1],x[2])),
+                Projection(lambda x: (x[0], x[1])),
                 Limit(5),
                # Sort(lambda x: x[1],True),
                 Aggregation(lambda x: x[2], lambda x: x[2],"count"),
