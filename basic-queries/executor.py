@@ -531,26 +531,26 @@ class TestFileScanDB:
     def test_full_scan(self):
         result = tuple(run(Q(
             Projection(lambda x: (x[0],x[1])),
-          #  Sort(lambda x: x[0],True),
-            Limit(100),
+            Limit(3),
+            #Sort(lambda x: x[0],False),
             FileScan(self.db_path,'mydb','movies',('int','str','str'))
             )))
         print("Data Results:")
         print(result)
-        #assert result == ((1, 'Toy Story (1995)'), (2, 'Jumanji (1995)'), (3, 'Grumpier Old Men (1995)'))
+        assert result == ((1, 'Toy Story (1995)'), (2, 'Jumanji (1995)'), (3, 'Grumpier Old Men (1995)'))
 
     def test_count_performance_on_the_whole_dataset(self):
             
             result = tuple(run(Q(
                 Projection(lambda x: (x[0], x[1])),
-                Limit(5),
-               # Sort(lambda x: x[1],True),
+                Limit(10),
+                Sort(lambda x: x[1],True),
                 Aggregation(lambda x: x[2], lambda x: x[2],"count"),
                 FileScan(self.db_path,'mydb','movies',('int','str','str'))
             )))
             print("Data Results:")
             print(result)
-            #assert result == (('Drama\n', 3294), ('Comedy\n', 1791), ('Documentary\n', 1550), ('Comedy|Drama\n', 964), ('Drama|Romance\n', 817))
+
     
 
 
