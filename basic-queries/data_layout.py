@@ -48,17 +48,21 @@ class DataBase:
             return False
         return True
     
+    def reset_page_read(self):
+        self.db.seek(self.header.start_offset)
+        
+    
     def write(self):
+        """
+            Write all the new pages to disk, it set the starting offset based on the current end offser which
+            is updated every time we add a new page in the add_record function, the page size and the 
+            number of pages that will be writen.
+        """
         start_page_offset = self.header.end_offset - PAGE_SIZE * len(self.pages)
-        start_header_offset = 0
-        db_header, db_pages = self.encode()
+        _, db_pages = self.encode()
         print("page to write: {}".format(db_pages))
         self.db.seek(start_page_offset)
         self.db.write(db_pages)
-
-        # self.db.seek(start_header_offset)
-        # self.db.write(db_header)
-        
 
     def add_record(self,record:tuple):
         page = self.last_page()
@@ -66,7 +70,6 @@ class DataBase:
         if not self.has_free_space(page,record=record):
             self.pages.append(DBPage())
             page = self.last_page()
-            print("new page, old end offset: {} - new end offser {}".format(self.header.end_offset,self.header.end_offset + PAGE_SIZE))
             self.header.end_offset = self.header.end_offset + PAGE_SIZE
             
         page.add_record(record,self.header.schema)
@@ -128,7 +131,6 @@ class DataBase:
         if n > 0:
            last = n-1
         else:
-           # print("end offset {}".format(self.header.end_offset - PAGE_SIZE))
             self.db.seek( self.header.end_offset - PAGE_SIZE if self.header.end_offset > 0 else 0)
             page_bytes = self.db.read(PAGE_SIZE)
             page = DBPage()

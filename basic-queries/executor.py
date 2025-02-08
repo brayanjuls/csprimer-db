@@ -1,5 +1,35 @@
 from data_layout import DataBase
 
+
+class NestedLoopJoin(object):
+    def __init__(self,left_node,right_node):
+        self.left_node = left_node
+        self.right_node = right_node
+        self.buffer_join = []
+
+    def next(self) -> tuple:
+        if len(self.buffer_join) > 0:
+            return self.buffer_join.pop(0)
+        elif self.left_node.has_next():
+            left_v =  self.left_node.next()
+            while self.right_node.has_next():
+                right_v = self.right_node.next()
+                self.buffer_join.append((*left_v,*right_v))
+            self.right_node.reset()
+            if len(self.buffer_join) > 0: 
+                return self.buffer_join.pop(0)
+        return None
+
+    def has_next(self) -> bool:
+        return self.left_node.has_next() or len(self.buffer_join) > 0
+    
+    def reset(self):
+        self.left_node.reset()
+        self.right_node.reset()
+        self.buffer_join = []
+
+
+
 class FileScan(object):
     def __init__(self,path,db_name,table_name,schema):
         self.db = DataBase(path,db_name,table_name,schema)
@@ -31,6 +61,10 @@ class FileScan(object):
         is_page_loaded = self.db.read()
         # if not is_page_loaded:
         #     print("not more pages available to load")
+    
+    def reset(self):
+        self.db.reset_page_read()
+
 
 
 
@@ -38,21 +72,16 @@ class CSVFileStream(object):
 
     def __init__(self,path,chunk_size,separetor = ",",contain_header=True):
         self.file = open(path,buffering=chunk_size,mode = 'rt',encoding='utf-8',)
-        
+        self.contain_header = contain_header
         if contain_header:
             self.file.readline() # read the header
         self.chunk_size = chunk_size
         self.separetor = separetor
-        # self.reader = csv.reader(self.file)
-        # next(self.reader)
+
     
     def stream_file(self):
         i = 0
         lines = []
-        # try:
-        #     return [tuple(next(self.reader))]
-        # except:
-        #     return lines
         for line in self.file:
             current_row = line.split(self.separetor)
             lines.append(tuple(current_row))
@@ -64,6 +93,12 @@ class CSVFileStream(object):
     def __del__(self):
         print('Closing file resources')
         self.file.close()
+
+    def reset(self):
+        self.file.seek(0)
+        if self.contain_header:
+            self.file.readline() 
+        
 
 class CSVFileScan(object):
 
@@ -109,6 +144,9 @@ class MemoryScan(object):
             return True
         else:
             False
+    
+    def reset(self):
+        self.idx = 0
 
 
 class Projection(object):
@@ -129,6 +167,9 @@ class Projection(object):
     
     def has_next(self):
         return self.child.has_next()
+    
+    def reset(self):
+        self.child.reset()
 
 class Selection(object):
     """
@@ -155,10 +196,12 @@ class Selection(object):
 
 class Limit(object):
     """
-    Return only as many as the limit, then stop
+    Return only as many as the limit, then stop. If offset parameter is provided the function will 
+    skip the number of rows provided as its value and start the limiting counting from the offset number.
     """
     def __init__(self, n, offset = 0):
         self.n = n
+        self.offset = offset
         self.fetched = 0 - offset
 
     def next(self):
@@ -174,6 +217,9 @@ class Limit(object):
 
     def has_next(self):
         return self.child.has_next() and self.fetched < self.n
+    
+    def reset(self):
+        self.fetched = 0 - self.offset
 
 class Sort(object):
     """
@@ -230,6 +276,9 @@ class Sort(object):
 
     def has_next(self):
         return self.child.has_next() or self.idx < len(self.sorted_elements)
+    
+    def reset(self):
+        self.idx = 0
 
 
 
@@ -291,6 +340,8 @@ class Aggregation(object):
     def has_next(self):
         return self.child.has_next() or len(self.result_keys) > 0
 
+    def reset(self):
+        return self.child.reset()    
 
 class Insert(object):
 
@@ -568,6 +619,146 @@ class TestInsertRecordDB:
         db = DataBase(self.db_path,"mydb","movies",('int','str','str'))
         run(Q(Insert(db,record)))
 
+class TestNestedLoopJoin:
+    left = (
+        ('Poor things',1),
+        ('Openhaimer',2),
+        ('ToyStory',3)
+    )
+    right = (
+        (4.2, 1),
+        (5.0, 2),
+        (4.9, 3),
+        (3.0, 4)
+    )
+    def test_product(self):
+        result = tuple(run(Q(
+            NestedLoopJoin(
+                Q(MemoryScan(self.left)),
+                Q(MemoryScan(self.right))
+            )
+        )))
+
+        expected = (
+            ('Poor things',1, 4.2, 1),
+            ('Poor things',1, 5.0, 2),
+            ('Poor things',1, 4.9, 3),
+            ('Poor things',1, 3.0, 4),
+            
+            ('Openhaimer',2, 4.2, 1),
+            ('Openhaimer',2, 5.0, 2),
+            ('Openhaimer',2, 4.9, 3),
+            ('Openhaimer',2, 3.0, 4),
+
+            ('ToyStory',3, 4.2, 1),
+            ('ToyStory',3, 5.0, 2),
+            ('ToyStory',3, 4.9, 3),
+            ('ToyStory',3, 3.0, 4),
+        )
+
+        print(result)
+
+        assert result == expected
+
+    def test_self_join(self):
+        result = tuple(run(Q(
+            NestedLoopJoin(Q(
+                MemoryScan(self.left)),
+                MemoryScan(self.left)
+                )))
+            )
+        expected =  (
+            ('Poor things',1,'Poor things',1),
+            ('Poor things',1,'Openhaimer',2),
+            ('Poor things',1,'ToyStory',3),
+            ('Openhaimer',2,'Poor things',1),
+            ('Openhaimer',2,'Openhaimer',2),
+            ('Openhaimer',2,'ToyStory',3),
+            ('ToyStory',3,'Poor things',1),
+            ('ToyStory',3,'Openhaimer',2),
+            ('ToyStory',3,'ToyStory',3)
+        )
+        print(result)
+        assert result == expected
+
+    def test_project_after_join(self):
+        result = tuple(run(Q(
+            Projection(lambda x: (x[0],x[2])),
+            NestedLoopJoin(Q(MemoryScan(self.left)),
+                           Q(MemoryScan(self.right))))
+                        ))
+        expected = (
+            ('Poor things', 4.2),
+            ('Poor things', 5.0),
+            ('Poor things', 4.9),
+            ('Poor things', 3.0),
+            
+            ('Openhaimer', 4.2),
+            ('Openhaimer', 5.0),
+            ('Openhaimer', 4.9),
+            ('Openhaimer', 3.0),
+
+            ('ToyStory', 4.2),
+            ('ToyStory', 5.0),
+            ('ToyStory', 4.9),
+            ('ToyStory', 3.0),
+            )
+        print(result)
+
+        assert result == expected
+
+    def test_project_before_join(self):
+        result = tuple(run(Q(
+            NestedLoopJoin(Q(Projection(lambda x: (x[0],)),MemoryScan(self.left)),
+                           Q(Projection(lambda x: (x[0],)),MemoryScan(self.right))))
+                        ))
+        expected = (
+            ('Poor things', 4.2),
+            ('Poor things', 5.0),
+            ('Poor things', 4.9),
+            ('Poor things', 3.0),
+            
+            ('Openhaimer', 4.2),
+            ('Openhaimer', 5.0),
+            ('Openhaimer', 4.9),
+            ('Openhaimer', 3.0),
+
+            ('ToyStory', 4.2),
+            ('ToyStory', 5.0),
+            ('ToyStory', 4.9),
+            ('ToyStory', 3.0),
+            )
+        print(result)
+
+        assert result == expected
+
+    def test_three_way_table(self):
+        result = tuple(run(Q(Selection(lambda x: x[4].lower() == 'openhaimer'),NestedLoopJoin(
+                           Q(NestedLoopJoin(Q(MemoryScan(self.left)),
+                           Q(MemoryScan(self.right)))),
+                           Q(Projection(lambda x: (x[0],)),MemoryScan(self.left)))))
+                           )
+        
+        expected = (
+            ('Poor things',1, 4.2, 1,'Openhaimer',),
+            ('Poor things',1, 5.0, 2,'Openhaimer',),
+            ('Poor things',1, 4.9, 3,'Openhaimer',),    
+            ('Poor things',1, 3.0, 4,'Openhaimer',),
+            ('Openhaimer',2, 4.2, 1,'Openhaimer',),
+            ('Openhaimer',2, 5.0, 2,'Openhaimer',),
+            ('Openhaimer',2, 4.9, 3,'Openhaimer',),
+            ('Openhaimer',2, 3.0, 4,'Openhaimer',),
+
+            ('ToyStory',3, 4.2, 1,'Openhaimer',),
+            ('ToyStory',3, 5.0, 2,'Openhaimer',), 
+            ('ToyStory',3, 4.9, 3,'Openhaimer',), 
+            ('ToyStory',3, 3.0, 4,'Openhaimer',),
+ 
+        )
+        
+        print(result)
+
+        assert result == expected
+
 if __name__ == '__main__':
-    # Test data generated by Claude and probably not accurate!
     print('ok')
