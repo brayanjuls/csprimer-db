@@ -11,8 +11,17 @@ The database currently contains two modules:
 
 * Query Projection
 * Query Selection
-* Query Sorting
-* Query Limit
+* Query Sorting: Does not support multi-page sorting
+* Query Limit and Offset
 * Query Grouping: functions count, sum, avg
 * Insertion: single and bulk
 * Query Joins: Nested Loop Joins
+
+
+### File Format Layout
+
+![file](file_format_layout_design_document.png)
+
+
+### Setup
+* input dataset: https://grouplens.org/datasets/movielens/20m/
