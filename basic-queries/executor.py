@@ -1,4 +1,55 @@
 from data_layout import DataBase
+from collections import defaultdict
+
+class HashJoin(object):
+    def __init__(self,left_node,right_node,left_key,right_key):
+        self.left_node = left_node
+        self.right_node = right_node
+        self.left_key = left_key
+        self.right_key = right_key
+        self.hash_table = defaultdict(list)
+        self.left_list = []
+        self.current_right_v = None
+
+    def next(self) -> tuple:
+        """
+            This function create a hash table from the left node and use it to find the relation on the right node. 
+            Apart from the left_node and right_node representing datasets, we also have left_key and right_key which 
+            are lambda functions to get the keys that will be used to join the datasets. 
+        """
+        if len(self.hash_table) == 0:
+            while self.left_node.has_next():
+                left_v = self.left_node.next()
+                left_k = self.left_key(left_v)
+                self.hash_table[left_k].append(left_v)
+        else:
+            if self.left_list is not None and len(self.left_list) > 0:
+                left_v = self.left_list.pop(0)
+                result = (*left_v,*self.current_right_v)
+                return result
+            elif self.right_node.has_next():
+                right_v = self.right_node.next()
+                right_k = self.right_key(right_v)
+                self.left_list = self.hash_table.get(right_k,None)
+                if self.left_list == None:
+                    return None
+                self.current_right_v = right_v
+                left_v = self.left_list.pop(0)
+                print(self.left_list)
+                return (*left_v,*right_v)
+        
+        return None
+            
+        
+
+    def has_next(self) -> bool:
+        return self.left_node.has_next() or (self.right_node.has_next() and len(self.hash_table) > 0) or len(self.left_list) > 0   
+
+
+    def reset(self):
+        self.left_node.child.reset()
+        self.right_node.child.reset()
+        self.hash_table = defaultdict(list)
 
 
 class NestedLoopJoin(object):
@@ -759,6 +810,66 @@ class TestNestedLoopJoin:
         print(result)
 
         assert result == expected
+
+
+class TestHashJoin:
+    left = (
+        ('Poor things',1,2),
+        ('Openhaimer',2,4),
+        ('ToyStory',3,3),
+        ('ToyStory',3,6),
+        ('Jockey',5,5),
+    )
+    right = (
+        (4.2, 1,3),
+        (3.0, 4,4),
+        (5.0, 2,1),
+        (4.9, 3,3),
+    )
+   
+    def test_single_join(self):
+
+       result = tuple(run(Q(
+           HashJoin(
+               Q(MemoryScan(self.left)),Q(MemoryScan(self.right)),lambda x: x[1],lambda x: x[1])
+               )))
+       expected = (('Poor things', 1, 2, 4.2, 1, 3), ('Openhaimer', 2, 4, 5.0, 2, 1), ('ToyStory', 3, 3, 4.9, 3, 3), ('ToyStory', 3, 6, 4.9, 3, 3), )
+       print(result)
+       assert result == expected
+    
+    def test_multiple_conditions(self):
+       result = tuple(run(Q(
+           HashJoin(
+               Q(MemoryScan(self.left)),Q(MemoryScan(self.right)),lambda x: (x[1],x[2]),lambda x: (x[1],x[2]))
+               )))
+       expected = ((('ToyStory', 3, 3, 4.9, 3, 3),))
+       print(result)
+       assert result == expected
+
+    def test_projection_before(self):
+        result = tuple(run(Q(
+           HashJoin(
+               Q(Projection(lambda x: (x[0],x[1])),MemoryScan(self.left)),
+               Q(Projection(lambda x: (x[0],x[1])),MemoryScan(self.right)),lambda x: x[1],lambda x: x[1])
+               )))
+        expected = (('Poor things', 1, 4.2, 1), ('Openhaimer', 2, 5.0, 2), ('ToyStory', 3, 4.9, 3), ('ToyStory', 3, 4.9, 3))
+        print(result)
+        assert result == expected
+
+
+    def test_projection_after(self):
+        result = tuple(run(Q(Projection(lambda x: (x[0],x[3])),
+           HashJoin(
+               Q(MemoryScan(self.left)),Q(MemoryScan(self.right)),lambda x: x[1],lambda x: x[1])
+               )))
+        expected = (('Poor things', 4.2), ('Openhaimer',5.0), ('ToyStory', 4.9), ('ToyStory', 4.9))
+        print(result)
+        assert result == expected
+
+       
+       
+
+
 
 if __name__ == '__main__':
     print('ok')
