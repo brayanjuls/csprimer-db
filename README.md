@@ -15,7 +15,7 @@ The database currently contains two modules:
 * Query Limit and Offset
 * Query Grouping: functions count, sum, avg
 * Insertion: single and bulk
-* Query Joins: Nested Loop Joins
+* Query Joins: Nested Loop Joins, Hash Join, Merge Join
 
 
 ### File Format Layout
