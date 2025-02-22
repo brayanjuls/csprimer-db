@@ -1,6 +1,80 @@
 from data_layout import DataBase
 from collections import defaultdict
 
+class MergeJoin(object):
+    def __init__(self,left_node,right_node,left_key,right_key):
+        self.left_node = left_node
+        self.right_node = right_node
+        self.left_key = left_key
+        self.right_key = right_key
+        self.rows_buffer = []
+        self.leading_value = None
+        self.non_leading_value = None
+        self.previous_leading_v = None
+        self.buff_idx = 0 
+
+    def next(self) -> tuple:
+        """
+            To implement this join strategy we assume both datasets come sorted then we chose one to be the leading
+            dataset(left node) and the other one would be the non leading dataset(right node), we iterate over each 
+            element using a technique similar to two pointers to find equal keys and return the joined dataset.
+        """
+        if self.leading_value is None and self.left_node.has_next():
+            self.leading_value = self.left_node.next()
+
+
+        while True:
+            if self.non_leading_value is None and self.right_node.has_next():
+                self.non_leading_value = self.right_node.next()
+
+            if self.leading_value is None and self.left_node.has_next():
+                self.leading_value = self.left_node.next()
+                # Validate if the current and previous leading values are different then we should clean the rows buffer
+                if self.previous_leading_v is not None and self.left_key(self.previous_leading_v) != self.left_key(self.leading_value):
+                    self.rows_buffer.clear()
+                    self.buff_idx = 0
+            
+        
+            if self.leading_value is None or self.non_leading_value is None:
+                return None
+            # If previous and leading values are equal then we should join the leading value with the rows_buffer 
+            if self.previous_leading_v is not None and self.left_key(self.previous_leading_v) == self.left_key(self.leading_value):
+                #print(f"{self.previous_leading_v} - {self.leading_value}")
+                if len(self.rows_buffer) > self.buff_idx:
+                        result = (*self.leading_value,*self.rows_buffer[self.buff_idx])
+                        self.buff_idx += 1
+                        return result
+                else:
+                    self.buff_idx = 0
+                    self.previous_leading_v = self.leading_value
+                    self.leading_value = None
+                    continue
+            
+            if self.left_key(self.leading_value) == self.right_key(self.non_leading_value):
+                #If values are matching we should append new non-leading records to the buffer
+                self.rows_buffer.append(self.non_leading_value)
+                result = (*self.leading_value,*self.non_leading_value)
+                self.non_leading_value = None
+            
+                return result
+            else:
+                if self.left_key(self.leading_value) > self.right_key(self.non_leading_value):
+                    self.non_leading_value = None
+                else:
+                    self.previous_leading_v = self.leading_value
+                    self.leading_value  = None
+                    
+
+
+    def has_next(self) -> bool:
+        return self.left_node.has_next() and self.right_node.has_next()
+    
+    def reset(self):
+        self.left_node.child.reset()
+        self.right_node.child.reset()
+        self.leading_value = None
+        self.non_leading_value = None
+
 class HashJoin(object):
     def __init__(self,left_node,right_node,left_key,right_key):
         self.left_node = left_node
@@ -867,7 +941,40 @@ class TestHashJoin:
         assert result == expected
 
        
-       
+class TestMergeJoin:
+    left = (("Claudia",1),("Jose",2),("Marco",3))
+    right = ((3.3,1),(3.4,1),(10.5,2),(50,3))
+
+    left_many = (("Claudia",1),("Jose",2),("Jose Jr",2),("Marco",3))
+    right_many = ((3.3,1),(3.4,1),(10.5,2),(30.5,2),(50,3))
+
+
+    def test_join_one_to_many(self):
+        result = tuple(run(Q(MergeJoin(
+            Q(Sort((lambda x: x[1])),MemoryScan(self.left)),
+            Q(Sort((lambda x: x[1])),MemoryScan(self.right)),
+            lambda x: x[1],lambda x: x[1]))))
+        expected = (('Claudia', 1, 3.3, 1), ('Claudia', 1, 3.4, 1), ('Jose', 2, 10.5, 2), ('Marco', 3, 50, 3))
+        print(result)
+        assert result == expected
+        
+
+    def test_join_many_to_many(self):
+        result = tuple(run(Q(MergeJoin(
+            Q(Sort((lambda x: x[1])),MemoryScan(self.left_many)),
+            Q(Sort((lambda x: x[1])),MemoryScan(self.right_many)),
+            lambda x: x[1],lambda x: x[1])
+        )))
+        expected = (('Claudia', 1, 3.3, 1), 
+                    ('Claudia', 1, 3.4, 1), 
+                    ('Jose', 2, 10.5, 2), 
+                    ('Jose', 2, 30.5, 2), 
+                    ('Jose Jr', 2, 10.5, 2), 
+                    ('Jose Jr', 2, 30.5, 2), 
+                    ('Marco', 3, 50, 3))
+        
+        print(result)
+        assert result == expected
 
 
 
