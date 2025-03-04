@@ -38,7 +38,7 @@ class DataBase:
             it would read the next page into memory.
         """
         try:
-           # print("current memory position {}".format(self.db.tell()))
+            #print("current memory position {}".format(self.db.tell()))
             page_bytes = self.db.read(PAGE_SIZE)
             if len(page_bytes) == 0:
                 return False
@@ -68,6 +68,8 @@ class DataBase:
         page = self.last_page()
         record = PageRecord(record)
         if not self.has_free_space(page,record=record):
+            self.write()
+            self.pages.pop()
             self.pages.append(DBPage())
             page = self.last_page()
             self.header.end_offset = self.header.end_offset + PAGE_SIZE
@@ -151,7 +153,7 @@ class DataBase:
            db_header_bytes = db.read(DB_HEADER_SIZE)
            self.header.decode(db_header_bytes)
         else:
-           db = BytesIO()
+           db = open(self.db_path,mode='w+b')
            self.pages.append(DBPage())
            self.header.end_offset = self.header.end_offset + PAGE_SIZE
         return db
@@ -410,7 +412,7 @@ class DBPage:
             elif dtype == 'float':
                 end_index = start_index+4
                 col_content = record[start_index:end_index]
-                value = float.fromhex(col_content.hex)
+                value = struct.unpack('f',col_content)[0]
                 decode_record.append(value)
                 start_index = end_index
             elif dtype == 'str':
@@ -460,13 +462,25 @@ if __name__ == '__main__':
     db_io = DataBase(
                      "/home/ubuntu/Home/Downloads/ml-20m/movies_slotted_2.db",
                      'mydb','movies',('int','str','str'))
+
+
+    # csv_f = open("/home/ubuntu/Home/Downloads/ml-20m/ratings.csv")
+    # reader = csv.reader(csv_f)
+    # #read header
+    # next(reader)
+    # db_io = DataBase(
+    #                  "/home/ubuntu/Home/Downloads/ml-20m/ratings_slotted.db",
+    #                  'mydb','ratings',('int','int','float','int'))
+
     i = 120
     while True:
-        i=i-1
+        #i=i-1
         record = get_next_tuple(reader)
         if record == ():
             break
         db_io.add_record(record)
+
+
     # pages = db_io.decode(*db_io.encode())[1]
     # records_list = [p.records  for p in pages]
     # records = [ record 
@@ -475,8 +489,8 @@ if __name__ == '__main__':
     # print([record.record for record in records])
 
     #header,records = db_io.decode(*db_io.encode())
+
     
-    db_io.persist()
     # while db_io.read():
     #     records = db_io.last_page().records
     #     print([record.record for record in records])

@@ -365,7 +365,7 @@ class Sort(object):
                 self.sorted_elements.append(element)
             #print(f"unsorted_elements: {self.sorted_elements}")
             
-            self.sorted_elements = list(sorted(self.sorted_elements,reverse=self.desc))
+            self.sorted_elements = list(sorted(self.sorted_elements,key=self.key,reverse=self.desc))
             #self.buble_sort()
             #print(f"sorted_elements: {self.sorted_elements}")
             current_element = self.sorted_elements[self.idx]
@@ -414,7 +414,7 @@ class Aggregation(object):
         self.col = col
         self.func_name = func_name.lower()
         self.acc = dict()
-        self.result_keys = set()
+        self.result_keys = list()
         self.idx = 0 
 
     def sum_func(self,current_group_col,current_acc_val,current_tuple):
@@ -442,10 +442,12 @@ class Aggregation(object):
                 current_tuple = self.child.next()
                 if current_tuple is None:
                     break
-      
+                
+                #print(current_tuple)
                 current_group_col  = self.group_col(current_tuple)
                 current_acc_val = self.acc.get(current_group_col,0)
-                self.result_keys.add(current_group_col)
+                if current_group_col not in self.acc:
+                    self.result_keys.append(current_group_col)
                 if self.func_name == 'sum':
                     self.sum_func(current_group_col,current_acc_val,current_tuple)
                 elif self.func_name == 'count':
@@ -456,10 +458,10 @@ class Aggregation(object):
                     raise NotImplementedError(f"the function {self.func_name} has not been implemented yet or does not exsits")
             if len(self.result_keys) == 0:
                 return None
-            key = self.result_keys.pop()
+            key = self.result_keys.pop(0)
             return (key,self.acc.get(key))
         else:
-            key = self.result_keys.pop()
+            key = self.result_keys.pop(0)
             return (key,self.acc.get(key))
 
     def has_next(self):
@@ -704,17 +706,19 @@ class TestCSVScanDB:
 
 
 class TestFileScanDB:
-    db_path = "/home/ubuntu/Home/Downloads/ml-20m/movies_slotted_2.db"
+    db_movie_path = "/home/ubuntu/Home/Downloads/ml-20m/movies_slotted_2.db"
+    db_rating_path = "/home/ubuntu/Home/Downloads/ml-20m/ratings_slotted.db"
+
     def test_full_scan(self):
         result = tuple(run(Q(
             Projection(lambda x: (x[0],x[1])),
-            Limit(100),
-            Sort(lambda x: x[0],True),
-            FileScan(self.db_path,'mydb','movies',('int','str','str'))
+            Limit(3),
+            Sort(lambda x: x[0]),
+            FileScan(self.db_movie_path,'mydb','movies',('int','str','str'))
             )))
         print("Data Results:")
         print(result)
-       # assert result == ((1, 'Toy Story (1995)'), (2, 'Jumanji (1995)'), (3, 'Grumpier Old Men (1995)'))
+        assert result == ((1, 'Toy Story (1995)'), (2, 'Jumanji (1995)'), (3, 'Grumpier Old Men (1995)'))
 
     def test_count_performance_on_the_whole_dataset(self):
             
@@ -723,11 +727,23 @@ class TestFileScanDB:
                 Limit(10),
                 Sort(lambda x: x[1],True),
                 Aggregation(lambda x: x[2], lambda x: x[2],"count"),
-                FileScan(self.db_path,'mydb','movies',('int','str','str'))
+                FileScan(self.db_movie_path,'mydb','movies',('int','str','str'))
             )))
+            expected = (('Drama', 4516), ('Comedy', 2278), ('Documentary', 1942), ('Comedy|Drama', 1263), ('Drama|Romance', 1074), ('Comedy|Romance', 754), ('Comedy|Drama|Romance', 605), ('Horror', 565), ('Crime|Drama', 448), ('Drama|Thriller', 426))
+            
             print("Data Results:")
             print(result)
+            assert result == expected
 
+    def test_avg_movies_rating(self):
+        result = tuple(run(Q(Limit(10),Aggregation(lambda x: x[1], lambda x: x[4],"avg"),MergeJoin(
+            Q(Sort((lambda x: x[0])),Projection(lambda x: (x[0],x[1])),FileScan(self.db_movie_path,'mydb','movies',('int','str','str'))),
+            Q(Sort((lambda x: x[1])),Projection(lambda x: (x[0],x[1],x[2])),FileScan(self.db_rating_path,'mydb','ratings',('int','int','float','int'))),
+            lambda x: x[0],lambda x: x[1]))))
+        expected = (('Toy Story (1995)', 3.92), ('Jumanji (1995)', 3.21), ('Grumpier Old Men (1995)', 3.15), ('Waiting to Exhale (1995)', 2.86), ('Father of the Bride Part II (1995)', 3.06), ('Heat (1995)', 3.83), ('Sabrina (1995)', 3.37), ('Tom and Huck (1995)', 3.14), ('Sudden Death (1995)', 3.0), ('GoldenEye (1995)', 3.43))
+        print("Data Results:")
+        print(result)
+        assert result == expected
     
 
 
